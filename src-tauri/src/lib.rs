@@ -1,21 +1,48 @@
 mod api;
+mod apple_proxy;
+mod cache;
+mod channel_page;
+mod env;
 #[cfg(target_os = "ios")]
 mod ios_layout;
+#[cfg(any(target_os = "ios", test))]
+mod ios_media_http;
 mod lines;
 #[cfg(target_os = "linux")]
 mod linux_http;
+#[cfg(target_os = "linux")]
+mod linux_webview;
 mod logging;
 #[cfg(target_os = "macos")]
 mod macos_titlebar;
 mod media;
 mod media_dns;
 mod net;
+mod net_diag;
 mod network_policy;
 mod playback_log;
+mod proxy;
+mod publish_parser;
+mod search_hot;
 mod session;
+mod updater;
 
 use api::Api;
 use tauri::Manager;
+
+/// AVFoundation loads media outside WKWebView's custom protocol handler.
+/// Start its loopback bridge only when an iOS native player requests it.
+#[tauri::command]
+async fn media_http_origin() -> Result<String, String> {
+    #[cfg(target_os = "ios")]
+    {
+        ios_media_http::origin().await
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        Err("原生媒体 HTTP 通道仅适用于 iOS".into())
+    }
+}
 
 fn allowed_dev_host(host: &str) -> bool {
     if matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]") {
@@ -88,6 +115,9 @@ pub fn run() {
                 let state: tauri::State<Api> = app.state();
                 state.session.bind(dir);
             }
+            if let Ok(cache_dir) = app.path().app_cache_dir() {
+                updater::cleanup_tv_updates(&cache_dir);
+            }
             // Linux 的 <video> 由 GStreamer 播放，它只认常规 HTTP scheme；
             // 这里起一个 loopback 代理，前端与 m3u8 改写都指向它（见 linux_http.rs）
             #[cfg(target_os = "linux")]
@@ -99,15 +129,19 @@ pub fn run() {
         })
         .plugin(
             tauri::plugin::Builder::<_, ()>::new("navigation-guard")
+                .on_webview_ready(|webview| {
+                    #[cfg(target_os = "linux")]
+                    linux_webview::configure(&webview);
+                    #[cfg(not(target_os = "linux"))]
+                    let _ = webview;
+                })
                 .on_navigation(|_webview, url| {
                     let host = url.host_str().unwrap_or("");
                     (url.scheme() == "tauri" && host == "localhost")
                         // Android 上自定义协议表现为 http://<scheme>.localhost，WebView 有时把它
                         // 当成一次导航进来。这是进程内的媒体代理地址，不出网，严格模式也不该拦。
-                        || (matches!(url.scheme(), "http" | "https") && host.ends_with(".localhost"))
+                        || (matches!(url.scheme(), "http" | "https") && network_policy::is_internal_webview_host(host))
                         || allowed_frontend_origin(&url.origin().ascii_serialization())
-                        || (!network_policy::strict_security()
-                            && matches!(url.scheme(), "http" | "https"))
                 })
                 .build(),
         )
@@ -136,7 +170,7 @@ pub fn run() {
                 None | Some("") | Some("null") => true,
                 Some(origin) => allowed_frontend_origin(origin),
             };
-            if network_policy::strict_security() && !origin_ok {
+            if !origin_ok {
                 playback_log::record("security.origin_denied", serde_json::json!({"origin_null": request_origin.as_deref() == Some("null")}));
                 responder.respond(
                     tauri::http::Response::builder()
@@ -149,11 +183,21 @@ pub fn run() {
             let uri = request.uri().clone();
             let path = uri.path().to_string();
             let query = uri.query().unwrap_or("").to_string();
+            // iOS 原生播放器会用小范围请求探测资源。只处理无条件、单头 GET Range；
+            // 尚无 ETag/Last-Modified 可校验时，If-Range 保守退回完整响应。
+            let range = if request.method() == tauri::http::Method::GET
+                && !request.headers().contains_key("If-Range")
+                && request.headers().get_all("Range").iter().count() == 1
+            {
+                request.headers().get("Range").and_then(|v| v.to_str().ok()).map(str::to_owned)
+            } else {
+                None
+            };
             // 自定义协议基址随平台不同，统一定义在 media::LOCAL_ORIGIN
             // （Windows/Android 是 http://<scheme>.localhost，macOS/iOS/Linux 是 <scheme>://localhost）。
-            // 它同时是 m3u8 分片/key 改写用的前缀，必须与前端 src/api.ts 的 LOCAL 一致。
+            // 它同时是 m3u8 分片/key 改写用的前缀，必须与前端 src/shared/api/api.ts 的 LOCAL 一致。
             tauri::async_runtime::spawn(async move {
-                let mut resp = media::handle(&path, &query, media::LOCAL_ORIGIN).await;
+                let mut resp = media::handle(&path, &query, media::LOCAL_ORIGIN, range.as_deref()).await;
                 if let Some(origin) =
                     request_origin.and_then(|s| tauri::http::HeaderValue::from_str(&s).ok())
                 {
@@ -170,59 +214,73 @@ pub fn run() {
             });
         })
         .invoke_handler(tauri::generate_handler![
-            api::app_boot,
+            api::platform::app_boot,
+            media_http_origin,
             playback_log::playback_log_status,
             playback_log::playback_log_set,
             playback_log::playback_log_write,
             playback_log::playback_log_read,
-            api::security_set,
-            api::debug_log,
-            api::net_diag,
-            api::line_state,
-            api::line_set,
-            api::line_mirrors,
-            api::line_probe,
-            api::line_auto,
-            api::line_try_main,
-            api::line_health,
-            api::check_update,
-            api::open_url,
-            api::set_orientation,
-            api::set_text_interaction,
-            api::api_login,
-            api::api_register,
-            api::api_logout,
-            api::api_me,
-            api::api_feed,
-            api::api_topics,
-            api::api_topic,
-            api::api_tags,
-            api::api_tag_videos,
-            api::api_category,
-            api::api_rank,
-            api::api_search,
-            api::api_search_hot,
-            api::cache_clear,
-            api::api_posts,
-            api::api_post,
-            api::api_post_playback,
-            api::api_post_like,
-            api::api_post_collect,
-            api::api_post_comments,
-            api::api_post_categories,
-            api::api_post_category,
-            api::api_related,
-            api::api_following,
-            api::api_user,
-            api::api_user_stats,
-            api::api_user_videos,
-            api::api_video,
-            api::api_play,
-            api::api_comments,
-            api::api_comment_send,
-            api::api_like,
-            api::api_collect,
-            api::api_follow,
+            api::platform::security_set,
+            api::platform::debug_log,
+            api::platform::net_diag,
+            api::lines::line_state,
+            api::lines::line_set,
+            api::lines::line_custom_set,
+            api::lines::line_reset,
+            api::lines::line_cancel,
+            api::lines::line_mirrors,
+            api::lines::line_probe,
+            api::lines::line_auto,
+            api::lines::line_try_main,
+            api::lines::line_health,
+            api::lines::proxy_state,
+            api::lines::proxy_set,
+            api::lines::proxy_test,
+            api::update::check_update,
+            api::update::download_tv_update,
+            api::update::cancel_tv_update,
+            api::update::open_url,
+            api::platform::set_orientation,
+            api::platform::set_text_interaction,
+            api::account::api_login,
+            api::account::api_register,
+            api::account::api_logout,
+            api::account::api_me,
+            api::account::api_account_history,
+            api::account::api_account_history_record,
+            api::account::api_account_history_delete,
+            api::feed::api_feed,
+            api::feed::api_original_videos,
+            api::feed::api_topics,
+            api::feed::api_topic,
+            api::feed::api_tags,
+            api::feed::api_tag_videos,
+            api::feed::api_post_tag,
+            api::feed::api_category,
+            api::feed::api_rank,
+            api::feed::api_search,
+            api::feed::api_search_hot,
+            api::platform::cache_clear,
+            api::feed::api_posts,
+            api::feed::api_post,
+            api::feed::api_post_playback,
+            api::interact::api_post_like,
+            api::interact::api_post_collect,
+            api::interact::api_post_comments,
+            api::feed::api_post_categories,
+            api::feed::api_post_category,
+            api::feed::api_related,
+            api::feed::api_following,
+            api::feed::api_user,
+            api::feed::api_user_stats,
+            api::feed::api_user_videos,
+            api::video::api_video,
+            api::video::api_play,
+            api::video::api_comments,
+            api::video::api_comment_send,
+            api::interact::api_like,
+            api::interact::api_collect,
+            api::interact::api_follow,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

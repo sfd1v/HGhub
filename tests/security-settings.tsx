@@ -1,9 +1,9 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { api } from "../src/api";
-import { AppProvider, useStore } from "../src/store";
-import { ArticlePanel } from "../src/components/Panels";
-import { isStrictSecurity, setStrictSecurity } from "../src/html";
+import { api } from "../src/shared/api/api";
+import { AppProvider, useStore } from "../src/shared/model/store";
+import { ArticlePanel } from "../src/features/feed/Panels";
+import { isStrictSecurity, setStrictSecurity } from "../src/shared/lib/html";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let store: ReturnType<typeof useStore>;
@@ -16,10 +16,10 @@ function deferred<T>() {
 const checks: string[] = [];
 function assert(ok: unknown, label: string) { if (!ok) throw new Error(label); checks.push(label); }
 const originalBoot = api.boot, originalSave = api.securitySet;
-const previousLocal = localStorage.getItem("hghub_strict_security");
+const previousLocal = localStorage.getItem("hghubx_strict_security");
 const root = createRoot(document.querySelector("#fixture")!);
 try {
-  localStorage.setItem("hghub_strict_security", "0");
+  localStorage.setItem("hghubx_strict_security", "0");
   setStrictSecurity(true);
   const boot = deferred<Awaited<ReturnType<typeof api.boot>>>();
   api.boot = () => boot.promise;
@@ -40,7 +40,7 @@ try {
   let failed = false;
   await act(async () => { try { await store!.setStrictSecurity(false); } catch { failed = true; } });
   assert(failed && store!.strictSecurity && isStrictSecurity() && !store!.securityPending, "failed save keeps backend-confirmed mode and reports failure");
-  assert(localStorage.getItem("hghub_strict_security") === "0", "mode changes do not write a second persisted source");
+  assert(localStorage.getItem("hghubx_strict_security") === "0", "mode changes do not write a second persisted source");
   document.querySelector("#results")!.textContent = JSON.stringify({ passed: checks.length, failed: 0, checks });
 } catch (error) {
   document.querySelector("#results")!.textContent = JSON.stringify({ passed: checks.length, failed: 1, error: String(error), checks });
@@ -48,6 +48,6 @@ try {
   await act(async () => root.unmount());
   api.boot = originalBoot; api.securitySet = originalSave;
   setStrictSecurity(true);
-  if (previousLocal === null) localStorage.removeItem("hghub_strict_security");
-  else localStorage.setItem("hghub_strict_security", previousLocal);
+  if (previousLocal === null) localStorage.removeItem("hghubx_strict_security");
+  else localStorage.setItem("hghubx_strict_security", previousLocal);
 }

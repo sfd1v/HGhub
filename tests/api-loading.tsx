@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
-import Home from "../src/pages/Home";
-import Category from "../src/pages/Category";
-import { AppProvider } from "../src/store";
+import Home from "../src/features/feed/Home";
+import Category from "../src/features/category/Category";
+import { AppProvider } from "../src/shared/model/store";
 import "../src/index.css";
 
 type Request = { cmd: string; args: Record<string, unknown>; resolve: (value: unknown) => void; reject: (error: string) => void };
@@ -37,7 +37,7 @@ Object.assign(window, {
   __TAURI_INTERNALS__: { invoke(cmd: string, args: Record<string, unknown> = {}) {
     if (cmd === "app_boot") return Promise.resolve({ user: null, logged_in: false, base: "https://fixture.invalid" });
     if (cmd === "debug_log") { fixture.debug.push(String(args.msg)); return Promise.resolve(); }
-    if (!["api_feed", "api_category", "api_posts"].includes(cmd)) return Promise.reject(`Unexpected IPC: ${cmd}`);
+    if (!["api_feed", "api_category", "api_original_videos", "api_post_category"].includes(cmd)) return Promise.reject(`Unexpected IPC: ${cmd}`);
     fixture.history.push({ cmd, args });
     return new Promise((resolve, reject) => pending.push({ cmd, args, resolve, reject }));
   } },
