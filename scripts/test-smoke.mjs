@@ -15,11 +15,14 @@ const tests = [
   ["ui-feedback", "scripts/test-ui-feedback.mjs"],
   ["profile-swipe", "scripts/test-profile-swipe.mjs"],
   ["channel-swipe", "scripts/test-channel-swipe.mjs"],
+  ["metric-sort", "scripts/test-metric-sort.mjs"],
   ["home-controls", "tests/test-home-controls.mjs"],
   ["rank-swipe", "scripts/test-rank-swipe.mjs"],
   ["search-tab-swipe", "scripts/test-search-tab-swipe.mjs"],
   ["search-nav-reset", "scripts/test-search-nav-reset.mjs"],
+  ["profile-nav-reset", "scripts/test-profile-nav-reset.mjs"],
   ["account-sync", "scripts/test-account-sync-empty-state.mjs"],
+  ["favorite-status-counts", "scripts/test-favorite-status-counts.mjs"],
   ["i18n", "scripts/test-i18n.mjs"],
 ];
 

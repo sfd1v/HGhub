@@ -59,6 +59,8 @@ export const IPip = S(<><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><r
 export const ISidebar = S(<><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /></>);
 export const IChevronUp = S(<path d="m6 14 6-6 6 6" />);
 export const IChevronDown = S(<path d="m6 10 6 6 6-6" />);
+export const ISortDesc = S(<><path d="M12 3.5v16" /><path d="m5.8 13.7 6.2 6.2 6.2-6.2" /></>);
+export const ISortAsc = S(<><path d="M12 20.5v-16" /><path d="m5.8 10.3 6.2-6.2 6.2 6.2" /></>);
 export const IRestore = S(<><rect x="4" y="8" width="12" height="12" rx="1.5" /><path d="M8 5V4h12v12h-1" /></>);
 export const ITheater = S(<><rect x="2.5" y="5" width="19" height="14" rx="2.5" /><path d="M6.5 5v14M17.5 5v14" /></>);
 export const INext = S(<><path d="M5 5v14l10-7Z" fill="currentColor" stroke="none" /><path d="M18 5v14" /></>);
@@ -85,7 +87,9 @@ export function Logo({ size = 28, className = "" }: { size?: number; className?:
     </svg>
   );
 }
+export const IFilter = S(<><path d="M4 5.5h16" /><path d="M7 10.5h10" /><path d="M10 15.5h5" /><path d="M11 20.5h2" /></>);
 export const IList = S(<><path d="M8.5 6.5h11" /><path d="M8.5 12h11" /><path d="M8.5 17.5h11" /><circle cx="4.6" cy="6.5" r="1.2" fill="currentColor" stroke="none" /><circle cx="4.6" cy="12" r="1.2" fill="currentColor" stroke="none" /><circle cx="4.6" cy="17.5" r="1.2" fill="currentColor" stroke="none" /></>);
+export const ISort = S(<><path d="M8 5.5h11" /><path d="M8 12h8" /><path d="M8 18.5h5" /><path d="m3.8 5.5 1.5 1.5 1.5-1.5" /><path d="m3.8 12 1.5 1.5 1.5-1.5" /><path d="m3.8 18.5 1.5 1.5 1.5-1.5" /></>);
 export const IFileText = S(<><path d="M6.5 3.5h7.2l3.8 3.8v13.2H6.5z" /><path d="M13.7 3.5v3.8h3.8" /><path d="M9.4 12.2h5.2" /><path d="M9.4 15.6h5.2" /></>);
 export const IInfo = S(<><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5.2" /><circle cx="12" cy="8.1" r="0.9" fill="currentColor" stroke="none" /></>);
 
