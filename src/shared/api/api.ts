@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { tracePlayback } from "../diagnostics/playbackDiagnostics";
 import type {
-  AccountHistoryPage, AccountIdentity, AccountSnapshot, CommentPage, Detail, HotSearchVideo, Paged, PlayInfo, Post, PostCategory, RankItem, TagGroup, TopicCard, TopicDetail, User, UserProfile, VideoCard,
+  AccountHistoryPage, AccountIdentity, AccountSnapshot, CommentPage, Detail, HotSearchVideo, HotTagItem, Paged, PlayInfo, Post, PostCategory, RankItem, TagGroup, TopicCard, TopicDetail, User, UserProfile, VideoCard,
 } from "./types";
 import { tr } from "../i18n";
 
@@ -58,7 +58,7 @@ const NET_FAIL = /dns|timed? ?out|timeout|connection|refused|reset|unreachable|b
 const READ_ONLY = new Set([
   "api_me", "api_feed", "api_original_videos", "api_category", "api_rank", "api_search",
   "api_posts", "api_post", "api_post_comments", "api_video", "api_play", "api_comments",
-  "api_topics", "api_topic", "api_tags", "api_tag_videos", "api_search_hot",
+  "api_topics", "api_topic", "api_tags", "api_hot_tags", "api_tag_videos", "api_search_hot",
   "api_post_playback", "api_post_categories", "api_post_category", "api_post_tag", "api_related", "api_following", "api_user", "api_user_stats", "api_user_videos",
 ]);
 /** 给自动选线用的观察点。api.ts 不反向依赖 autoLine，避免循环 import。 */
@@ -86,7 +86,7 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
     // 落盘完整错误链（dns error / connection refused / 证书错误…），toast 只显示截断版
     logLine(`[api] ${cmd} → ${msg}`);
     tracePlayback("api.fail", { cmd, err: msg, status: status ?? null, networkish });
-    notifyNet({ ok: false, cmd, msg, networkish });
+    notifyNet({ ok: false, cmd, msg, networkish: networkish || status === "403" });
     // 线路可能正被自动切走：给切换留一点时间，只读请求重试一次，用户就不用看见这条错误
     if (networkish && READ_ONLY.has(cmd)) {
       logLine(`[api] ${cmd} 链路异常，1.2s 后重试一次`);
@@ -137,6 +137,7 @@ export const api = {
   topics: () => call<{ items: TopicCard[] }>("api_topics"),
   topic: (slug: string, page = 1, size = 20) => call<TopicDetail>("api_topic", { slug, page, size }),
   tags: () => call<{ categories: TagGroup[] }>("api_tags"),
+  hotTags: () => call<{ items: HotTagItem[] }>("api_hot_tags"),
   tagVideos: (tag: string, page = 1, size = 20, sort: "latest" | "hot" = "latest") =>
     call<Paged<VideoCard>>("api_tag_videos", { tag, page, size, sort }),
   postTag: (tag: string, page = 1, size = 20) =>
