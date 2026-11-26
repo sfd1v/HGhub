@@ -3,7 +3,7 @@ import { Loader } from "../../shared/ui/ios/effects";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { api, fmt } from "../../shared/api/api";
 import type { Post, TopicCard, TopicDetail, VideoCard } from "../../shared/api/types";
-import { useStore } from "../../shared/model/store";
+import { ACTION_TOAST_SLOT, useStore } from "../../shared/model/store";
 import { MAX_BLOCKED_TAGS, MAX_PINNED_TAGS, MAX_TAG_LENGTH, useContentPreferences } from "../../shared/model/contentPreferences";
 import { AUTO_LOAD_EMPTY_PAGE_LIMIT, useAutoLoadMore } from "../../shared/lib/useAutoLoadMore";
 import { Masonry, MediaCard } from "../../shared/ui/cards";
@@ -13,7 +13,9 @@ import { Empty, Img } from "../../shared/ui/ui";
 import { IBack, IFireF, ILayers, IPin, IPinF, IRefresh, ISearch, ITag } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
 import { VideoSortMenu } from "../../shared/ui/VideoSortMenu";
+import { TagStatusMenu, type WorkStatus } from "./TagStatusMenu";
 import { sortVideosByMetric, type VideoSortDirection, type VideoSortMetric } from "../../shared/model/videoSort";
+import { clearTagVideoCountCache, useNonEmptyTags } from "./useNonEmptyTags";
 
 const TopicIcon = ILayers;
 const TagIcon = ITag;
@@ -363,22 +365,30 @@ function TagPinChip({ name, hotScore, pinned, board = false, onOpen, onTogglePin
 }
 
 export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }) {
-  const { push, toast } = useStore();
+  const { push, toast, lineEpoch } = useStore();
   const { preferences, isTagPinned, togglePinnedTag } = useContentPreferences();
   const pinnedTags = preferences.pinnedTags;
   const [searching, setSearching] = useState(false);
+  const [probeNonce, setProbeNonce] = useState(0);
   const { data, loading, err, load } = useDiscoveryData("tags", api.tags);
-  const groups = data?.categories ?? [];
+  const rawGroups = useMemo(() => data?.categories ?? [], [data]);
+  const groups = useNonEmptyTags(rawGroups, lineEpoch, probeNonce);
+
+  const refresh = useCallback(async () => {
+    clearTagVideoCountCache(lineEpoch);
+    setProbeNonce((n) => n + 1);
+    await load();
+  }, [lineEpoch, load]);
 
   const totalTags = groups.reduce((sum, g) => sum + (g.tags?.length || 0), 0);
   const togglePin = useCallback((name: string) => {
     const currentlyPinned = isTagPinned(name);
     if (!currentlyPinned && pinnedTags.length >= MAX_PINNED_TAGS) {
-      toast(tr("最多置顶 {0} 个标签", MAX_PINNED_TAGS), "info");
+      toast(tr("最多置顶 {0} 个标签", MAX_PINNED_TAGS), "info", ACTION_TOAST_SLOT);
       return;
     }
     togglePinnedTag(name);
-    toast(currentlyPinned ? tr("已取消置顶：{0}", name) : tr("已置顶标签：{0}", name), currentlyPinned ? "info" : "ok");
+    toast(currentlyPinned ? tr("已取消置顶：{0}", name) : tr("已置顶标签：{0}", name), currentlyPinned ? "info" : "ok", ACTION_TOAST_SLOT);
   }, [isTagPinned, pinnedTags.length, toast, togglePinnedTag]);
 
   return (
@@ -389,16 +399,16 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
           <span className="w-9 h-9 rounded-[12px] bg-pc text-on-pc flex items-center justify-center shrink-0"><TagIcon size={18} /></span>
           <div className="flex-1 min-w-0">
             <h1 className="text-[17px] font-bold text-on leading-tight">{tr("标签")}</h1>
-            <div className="text-[12px] text-mut leading-tight mt-0.5">{loading && !groups.length ? tr("加载中…") : tr("{0} 个标签 · {1} 组", totalTags, groups.length)}</div>
+            <div className="text-[12px] text-mut leading-tight mt-0.5">{loading && !rawGroups.length ? tr("加载中…") : tr("{0} 个标签 · {1} 组", totalTags, groups.length)}</div>
           </div>
           <Button onClick={() => setSearching(true)} aria-label={tr("搜索短剧")} className="ios-nav-btn"><ISearch size={18} /></Button>
-          <Button aria-label={tr("刷新")} disabled={loading} aria-busy={loading} onClick={() => void load()} className="ios-nav-btn">{loading ? <Loader className="w-4 h-4" /> : <IRefresh size={18} />}</Button>
+          <Button aria-label={tr("刷新")} disabled={loading} aria-busy={loading} onClick={() => void refresh()} className="ios-nav-btn">{loading ? <Loader className="w-4 h-4" /> : <IRefresh size={18} />}</Button>
         </div>
       </div>
 
       <div className="flex-1 scroll-y pt-3.5 pb-8" aria-busy={loading}>
-        {groups.length > 0 && <RefreshStatus loading={loading} error={err} onRetry={() => void load()} />}
-        {groups.length > 0 && <Surface data-pin-board className="mb-3.5 rounded-[22px] bg-s1 p-4 a-rise" aria-label={tr("置顶标签")}>
+        {rawGroups.length > 0 && <RefreshStatus loading={loading} error={err} onRetry={() => void refresh()} />}
+        {rawGroups.length > 0 && <Surface data-pin-board className="mb-3.5 rounded-[22px] bg-s1 p-4 a-rise" aria-label={tr("置顶标签")}>
           <div className="flex items-baseline justify-between gap-2">
             <h2 className="flex items-center gap-1.5 text-[14.5px] font-bold text-on"><IPin size={15} className="text-primary" />{tr("置顶标签")}</h2>
             <span className="text-[12px] text-dim tabular-nums" aria-live="polite">{tr("{0} 个", pinnedTags.length)}</span>
@@ -408,10 +418,10 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
             {pinnedTags.map(name => <TagPinChip key={name} name={name} pinned board onOpen={() => push({ kind: "tag", tag: name, name })} onTogglePin={togglePin} />)}
           </div>}
         </Surface>}
-        {loading && !groups.length ? (
+        {loading && !rawGroups.length ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
-        ) : err && !groups.length ? (
-          <Empty icon={<TagIcon size={26} />} title={tr("标签加载失败")} sub={err} action={tr("重试")} onAction={load} />
+        ) : err && !rawGroups.length ? (
+          <Empty icon={<TagIcon size={26} />} title={tr("标签加载失败")} sub={err} action={tr("重试")} onAction={() => void refresh()} />
         ) : groups.length ? (
           <div className={`grid gap-3.5 ${wide ? "grid-cols-2" : "grid-cols-1"}`}>{groups.map((g) => (
             <Surface key={g.name} className="rounded-[22px] bg-s1 p-4 a-rise">
@@ -452,7 +462,9 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
   const [videos, setVideos] = useState<VideoCard[]>([]);
   const [metricSort, setMetricSort] = useState<VideoSortMetric>("default");
   const [metricDirection, setMetricDirection] = useState<VideoSortDirection>("desc");
+  const [workStatus, setWorkStatus] = useState<WorkStatus>("all");
   const [metricVisible, setMetricVisible] = useState(20);
+  const [allVideosLoaded, setAllVideosLoaded] = useState(false);
   const metricLoaded = useRef(false);
   const [posts, setPosts] = useState<Post[]>([]);
   const [videoPage, setVideoPage] = useState(0);
@@ -470,21 +482,32 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
   const [loadedVideoTag, setLoadedVideoTag] = useState("");
   const [loadedPostTag, setLoadedPostTag] = useState("");
   const busy = useRef({ video: false, post: false });
+  const allVideosLoading = useRef(false);
   const sequence = useRef({ video: 0, post: 0 });
   const videoSentinel = useRef<HTMLDivElement>(null);
   const postSentinel = useRef<HTMLDivElement>(null);
   const scrollContainer = useRef<HTMLDivElement>(null);
   const currentVideos = loadedVideoTag === tag;
   const currentPosts = loadedPostTag === tag;
-  const sortedVideos = useMemo(
-    () => currentVideos ? sortVideosByMetric(videos, metricSort, metricDirection) : [],
-    [currentVideos, videos, metricSort, metricDirection],
+  const statusCounts = useMemo(() => allVideosLoaded ? {
+    ongoing: videos.filter(video => !video.is_finished).length,
+    finished: videos.filter(video => video.is_finished).length,
+  } : null, [allVideosLoaded, videos]);
+  const statusVideos = useMemo(
+    () => workStatus === "all" ? videos : videos.filter(video => workStatus === "finished" ? video.is_finished : !video.is_finished),
+    [videos, workStatus],
   );
-  const visibleVideos = metricSort === "default" ? sortedVideos : sortedVideos.slice(0, metricVisible);
+  const sortedVideos = useMemo(
+    () => currentVideos ? sortVideosByMetric(statusVideos, metricSort, metricDirection) : [],
+    [currentVideos, statusVideos, metricSort, metricDirection],
+  );
+  const localPaging = allVideosLoaded || metricSort !== "default" || workStatus !== "all";
+  const visibleVideos = localPaging ? sortedVideos.slice(0, metricVisible) : sortedVideos;
   const visiblePosts = currentPosts ? posts : [];
 
-  const loadMetricVideos = async (metric: VideoSortMetric) => {
-    if (metric === "default") return;
+  const loadAllVideos = async () => {
+    if (allVideosLoading.current) return;
+    allVideosLoading.current = true;
     busy.current.video = true;
     const token = ++sequence.current.video;
     setVideoLoading(true);
@@ -518,6 +541,7 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
       setVideoPages(totalPages);
       setVideoTotal(first?.pagination?.total || unique.length);
       metricLoaded.current = true;
+      setAllVideosLoaded(true);
     } catch (error) {
       if (sequence.current.video !== token) return;
       if (all.length) {
@@ -529,7 +553,9 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
       }
       const message = error instanceof Error ? error.message : tr("加载失败，请重试");
       setVideoErr(message);
+      setAllVideosLoaded(false);
     } finally {
+      allVideosLoading.current = false;
       if (sequence.current.video === token) {
         busy.current.video = false;
         setVideoLoading(false);
@@ -591,20 +617,22 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
   }, [tag, name]);
   const togglePin = useCallback(() => {
     if (!tagPinned && preferences.pinnedTags.length >= MAX_PINNED_TAGS) {
-      toast(tr("最多置顶 {0} 个标签", MAX_PINNED_TAGS), "info");
+      toast(tr("最多置顶 {0} 个标签", MAX_PINNED_TAGS), "info", ACTION_TOAST_SLOT);
       return;
     }
     togglePinnedTag(name);
-    toast(tagPinned ? tr("已取消置顶：{0}", name) : tr("已置顶标签：{0}", name), tagPinned ? "info" : "ok");
+    toast(tagPinned ? tr("已取消置顶：{0}", name) : tr("已置顶标签：{0}", name), tagPinned ? "info" : "ok", ACTION_TOAST_SLOT);
   }, [name, preferences.pinnedTags.length, tagPinned, toast, togglePinnedTag]);
   const changeMetricSort = (value: VideoSortMetric, direction: VideoSortDirection = "desc") => {
     if (value === metricSort && direction === metricDirection) return;
     if (scrollContainer.current) scrollContainer.current.scrollTop = 0;
     setMetricVisible(20);
     if (value === "default") {
-      metricLoaded.current = false;
       setMetricSort("default");
       setMetricDirection("desc");
+      setMetricVisible(20);
+      if (allVideosLoaded) return;
+      metricLoaded.current = false;
       setVideos([]); setLoadedVideoTag(""); setVideoPage(0); setVideoPages(1); setVideoTotal(0);
       void load("video", 1, true);
       return;
@@ -613,14 +641,22 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
     setMetricSort(value);
     setMetricDirection(direction);
     if (!metricChanged) return;
-    if (metricLoaded.current) return;
-    void loadMetricVideos(value);
+    if (allVideosLoaded) return;
+    void loadAllVideos();
+  };
+  const changeWorkStatus = (value: WorkStatus) => {
+    if (value === workStatus) return;
+    if (scrollContainer.current) scrollContainer.current.scrollTop = 0;
+    setMetricVisible(20);
+    setWorkStatus(value);
+    if (value !== "all" && !allVideosLoaded) void loadAllVideos();
   };
   useEffect(() => {
     sequence.current.video++; sequence.current.post++;
     busy.current.video = false; busy.current.post = false;
+    allVideosLoading.current = false;
     setVideos([]); setPosts([]); setLoadedVideoTag(""); setLoadedPostTag("");
-    setMetricSort("default"); setMetricDirection("desc"); setMetricVisible(20); metricLoaded.current = false;
+    setMetricSort("default"); setMetricDirection("desc"); setWorkStatus("all"); setMetricVisible(20); metricLoaded.current = false; setAllVideosLoaded(false);
     setVideoPage(0); setPostPage(0); setVideoPages(1); setPostPages(1); setVideoTotal(0); setPostTotal(0);
     setVideoLoading(true); setPostLoading(true); setVideoErr(""); setPostErr("");
     setVideoEmptyStreak(0); setPostEmptyStreak(0);
@@ -636,10 +672,10 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
     scrollRef: scrollContainer,
     sentinelRef: videoSentinel,
     enabled: !videoErr && !videoLoading
-      && (metricSort === "default" ? videoPage < videoPages && !videoAutoLoadPaused : metricVisible < sortedVideos.length),
-    watchKey: `${videoPage}:${videoPages}:${videos.length}:${metricSort}:${metricDirection}:${metricVisible}`,
+      && (localPaging ? metricVisible < sortedVideos.length : videoPage < videoPages && !videoAutoLoadPaused),
+    watchKey: `${videoPage}:${videoPages}:${videos.length}:${metricSort}:${metricDirection}:${workStatus}:${metricVisible}:${allVideosLoaded}`,
     onLoadMore: () => {
-      if (metricSort !== "default") {
+      if (localPaging) {
         setMetricVisible(count => Math.min(count + 20, sortedVideos.length));
       } else {
         void load("video", videoPage + 1);
@@ -689,19 +725,18 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
           {storageError && <p role="alert" className="mt-2 text-[13px] text-danger">{storageError}</p>}
         </Surface>
         {videoLoading && !visibleVideos.length && <div className="flex justify-center py-8"><Loader className="w-7 h-7 spinner" /></div>}
-        {videoErr && !visibleVideos.length && <Empty icon={<TagIcon size={26} />} title={tr("短剧加载失败")} sub={videoErr} action={tr("重试")} onAction={() => void (metricSort === "default" ? load("video", 1, true) : loadMetricVideos(metricSort))} />}
+        {videoErr && !visibleVideos.length && <Empty icon={<TagIcon size={26} />} title={tr("短剧加载失败")} sub={videoErr} action={tr("重试")} onAction={() => void (localPaging ? loadAllVideos() : load("video", 1, true))} />}
         {visibleVideos.length > 0 && <section className="mb-6">
           <div className="mb-3 flex items-center gap-2">
-            <h2 className="text-[15px] font-bold text-on">{tr("短剧")}</h2>
-            <span className="text-[12px] text-mut tabular-nums">{videoTotal}</span>
+            <TagStatusMenu total={videoTotal} status={workStatus} counts={statusCounts} onChange={changeWorkStatus} />
             <VideoSortMenu className="ml-auto" value={metricSort} direction={metricDirection} onChange={changeMetricSort} />
           </div>
-          <Masonry videos={visibleVideos} scopeKey={`tag-video:${tag}:${metricSort}:${metricDirection}`} wide={wide} onOpen={(v, visible) => push({ kind: "feed", videoIds: visible.map(x => x.id), index: visible.findIndex(x => x.id === v.id), title: name })} />
+          <Masonry videos={visibleVideos} scopeKey={`tag-video:${tag}:${metricSort}:${metricDirection}:${workStatus}`} wide={wide} onOpen={(v, visible) => push({ kind: "feed", videoIds: visible.map(x => x.id), index: visible.findIndex(x => x.id === v.id), title: name })} />
         </section>}
         <div ref={videoSentinel} className="h-2" aria-hidden="true" />
-        {videoErr && visibleVideos.length > 0 && <div role="status" className="flex flex-wrap items-center justify-center gap-2 py-2 text-[12px] text-mut"><span>{tr("短剧加载失败：{0}", videoErr)}</span><Button onClick={() => void (metricSort === "default" ? load("video", videoPage + 1) : loadMetricVideos(metricSort))} className="px-3 text-primary">{tr("重试")}</Button></div>}
+        {videoErr && visibleVideos.length > 0 && <div role="status" className="flex flex-wrap items-center justify-center gap-2 py-2 text-[12px] text-mut"><span>{tr("短剧加载失败：{0}", videoErr)}</span><Button onClick={() => void (localPaging ? loadAllVideos() : load("video", videoPage + 1))} className="px-3 text-primary">{tr("重试")}</Button></div>}
         {videoLoading && visibleVideos.length > 0 && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}
-        {metricSort === "default" && !videoLoading && !videoErr && videoPage < videoPages && videoAutoLoadPaused && <Button onClick={() => { setVideoEmptyStreak(0); void load("video", videoPage + 1); }} className="my-2 px-4 text-primary">{tr("加载更多短剧")}</Button>}
+        {metricSort === "default" && workStatus === "all" && !allVideosLoaded && !videoLoading && !videoErr && videoPage < videoPages && videoAutoLoadPaused && <Button onClick={() => { setVideoEmptyStreak(0); void load("video", videoPage + 1); }} className="my-2 px-4 text-primary">{tr("加载更多短剧")}</Button>}
 
         {postLoading && !visiblePosts.length && <div className="flex justify-center py-8"><Loader className="w-7 h-7 spinner" /></div>}
         {postErr && !visiblePosts.length && <Empty icon={<TagIcon size={26} />} title={tr("吃瓜帖子加载失败")} sub={postErr} action={tr("重试")} onAction={() => void load("post", 1, true)} />}
